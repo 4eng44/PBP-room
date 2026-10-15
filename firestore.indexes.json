@@ -1,0 +1,9 @@
+{
+  "indexes": [
+    { "collectionGroup": "private", "queryScope": "COLLECTION",
+      "fields": [ { "fieldPath": "aud", "arrayConfig": "CONTAINS" }, { "fieldPath": "ts", "order": "DESCENDING" } ] },
+    { "collectionGroup": "private", "queryScope": "COLLECTION",
+      "fields": [ { "fieldPath": "aud", "arrayConfig": "CONTAINS" }, { "fieldPath": "ts", "order": "ASCENDING" } ] }
+  ],
+  "fieldOverrides": []
+}

@@ -1,0 +1,8 @@
+{
+  "name": "pbp-chat-build",
+  "private": true,
+  "type": "module",
+  "scripts": { "build": "node build.mjs" },
+  "dependencies": { "firebase": "^12.0.0" },
+  "devDependencies": { "esbuild": "^0.24.0" }
+}

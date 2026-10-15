@@ -1,0 +1,148 @@
+rules_version = '2';
+// PbP 세션룸 보안 규칙
+// ⚠ 아래 ADMIN 이메일을 내 이메일(소문자)로 바꾼 뒤 배포하세요.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function adminEmail() { return 'YOUR_EMAIL@example.com'; }
+
+    function signedIn() { return request.auth != null && request.auth.token.email_verified == true; }
+    function myEmail() { return request.auth.token.email.lower(); }
+    function isAdmin() { return signedIn() && myEmail() == adminEmail().lower(); }
+    function invited() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/config/access)
+        && myEmail() in get(/databases/$(database)/documents/config/access).data.emails;
+    }
+    // 입장 비밀번호를 한 번 맞게 입력한 사람 (grants/{uid} 문서가 있음)
+    function granted() { return signedIn() && exists(/databases/$(database)/documents/grants/$(request.auth.uid)); }
+    function allowed() { return isAdmin() || invited() || granted(); }
+    function me() { return request.auth.uid; }
+    function member(rid) { return allowed() && exists(/databases/$(database)/documents/rooms/$(rid)/members/$(request.auth.uid)); }
+    function isMember(rid, uid) { return exists(/databases/$(database)/documents/rooms/$(rid)/members/$(uid)); }
+    function charOwner(rid, cid) { return get(/databases/$(database)/documents/rooms/$(rid)/characters/$(cid)).data.owner; }
+    function charCreator(rid, cid) { return get(/databases/$(database)/documents/rooms/$(rid)/characters/$(cid)).data.get('creator', ''); }
+    function roomData(rid) { return get(/databases/$(database)/documents/rooms/$(rid)).data; }
+    function textOk(d) { return !('text' in d) || !(d.text is string) || d.text.size() <= 20000; }
+    // 서술·판정 안내·장면은 GM(방장)만, 로그 가져오기도 방장만, 캐릭터 대사는 그 캐릭터를 쓰는 사람만
+    function msgOk(rid, d) {
+      return textOk(d)
+        && (!(d.get('kind', '') in ['gm', 'call', 'scene']) || roomOwner(rid))
+        && (d.get('imported', false) != true || roomOwner(rid))
+        && (d.get('charId', null) == null
+            ? (d.get('charName', null) == null || roomOwner(rid))
+            : (roomOwner(rid) || get(/databases/$(database)/documents/rooms/$(rid)/characters/$(d.charId)).data.owner == me()));
+    }
+    // 수정은 글 내용만, 주사위 결과 메시지는 수정 불가
+    function editOk() {
+      return resource.data.get('kind', '') != 'roll'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['text', 'inline', 'editedAt', 'plain'])
+        && textOk(request.resource.data);
+    }
+    function roomOwner(rid) { return allowed() && get(/databases/$(database)/documents/rooms/$(rid)).data.owner == request.auth.uid; }
+
+    // 초대 목록 (관리자만)
+    match /config/access { allow read, write: if isAdmin(); }
+    // 입장 비밀번호 (관리자만 읽고 씀 — 다른 사람은 내용을 볼 수 없음)
+    match /config/passcode { allow read, write: if isAdmin(); }
+    // 비밀번호가 맞을 때만 만들 수 있는 입장 기록
+    match /grants/{uid} {
+      allow get: if signedIn() && (me() == uid || isAdmin());
+      allow list, delete: if isAdmin();
+      allow create: if signedIn() && me() == uid
+        && exists(/databases/$(database)/documents/config/passcode)
+        && request.resource.data.code is string
+        && request.resource.data.code == get(/databases/$(database)/documents/config/passcode).data.code;
+      allow update: if false;
+    }
+    // 초대 여부 확인용 (문서가 없어도 됨)
+    match /config/ping { allow get: if allowed(); }
+
+    // 내가 들어간 방 목록 등 개인 기록
+    match /users/{uid}/{rest=**} { allow read, write: if allowed() && me() == uid; }
+
+    match /rooms/{rid} {
+      allow get: if allowed();
+      allow list: if false;
+      allow create: if allowed() && request.resource.data.owner == me();
+      allow update: if roomOwner(rid) && request.resource.data.owner == resource.data.owner;
+      allow delete: if roomOwner(rid);
+
+      // 닉네임: 초대된 사람은 읽기, 본인만 쓰기
+      match /members/{uid} {
+        allow read: if allowed();
+        allow create: if allowed() && me() == uid && exists(/databases/$(database)/documents/rooms/$(rid))
+          && !(me() in roomData(rid).get('banned', []))
+          && request.resource.data.get('nick', '') is string && request.resource.data.get('nick', '').size() <= 40;
+        allow update: if allowed() && me() == uid
+          && request.resource.data.get('nick', '') is string && request.resource.data.get('nick', '').size() <= 40;
+        allow delete: if allowed() && (me() == uid || roomOwner(rid));
+      }
+
+      // 공개 채팅
+      match /messages/{mid} {
+        allow read: if member(rid);
+        allow create: if member(rid) && request.resource.data.uid == me() && msgOk(rid, request.resource.data);
+        allow update: if member(rid) && resource.data.uid == me() && request.resource.data.uid == me() && editOk();
+        allow delete: if member(rid) && (resource.data.uid == me() || roomOwner(rid));
+      }
+
+      // 귓속말 · 비밀 굴림 · 전용 핸드아웃 카드: aud에 든 사람만 읽기
+      match /private/{mid} {
+        allow read: if member(rid) && me() in resource.data.aud;
+        allow create: if member(rid) && request.resource.data.uid == me() && msgOk(rid, request.resource.data)
+          && me() in request.resource.data.aud && request.resource.data.aud.size() <= 3;
+        allow update: if member(rid) && resource.data.uid == me() && request.resource.data.uid == me() && editOk();
+        allow delete: if member(rid) && (resource.data.uid == me() || roomOwner(rid));
+      }
+
+      // 캐릭터 (공개 부분: 이름·색·인장)
+      match /characters/{cid} {
+        allow read: if member(rid);
+        // owner = 이 캐릭터를 쓰는 사람(방 참여자 누구로든 지정 가능), creator = 만든 사람
+        allow create: if member(rid) && isMember(rid, request.resource.data.owner)
+          && (request.resource.data.owner == me() || request.resource.data.get('creator', '') == me());
+        allow update: if member(rid) && (resource.data.owner == me() || roomOwner(rid))
+          && isMember(rid, request.resource.data.owner);
+        allow delete: if member(rid) && (resource.data.owner == me() || roomOwner(rid));
+      }
+
+      // 비공개 시트 내용: aud에 든 사람만
+      match /charPriv/{cid} {
+        allow read: if member(rid) && me() in resource.data.aud;
+        allow create: if member(rid) && request.resource.data.owner == charOwner(rid, cid)
+          && (charOwner(rid, cid) == me() || roomOwner(rid) || charCreator(rid, cid) == me());
+        allow update: if member(rid) && (resource.data.owner == me() || roomOwner(rid))
+          && request.resource.data.owner == charOwner(rid, cid);
+        allow delete: if member(rid) && (resource.data.owner == me() || roomOwner(rid));
+      }
+
+      // 전체 공개 핸드아웃
+      match /handouts/{hid} {
+        allow read: if member(rid);
+        allow create: if member(rid) && request.resource.data.by == me();
+        allow update, delete: if member(rid) && (resource.data.by == me() || roomOwner(rid));
+      }
+
+      // 특정 사람 전용 핸드아웃
+      match /hoPriv/{hid} {
+        allow read: if member(rid) && me() in resource.data.aud;
+        allow create: if member(rid) && request.resource.data.by == me() && me() in request.resource.data.aud;
+        allow update: if member(rid) && resource.data.by == me();
+        allow delete: if member(rid) && (resource.data.by == me() || roomOwner(rid));
+      }
+
+      // 요약
+      match /info/{d} {
+        allow read: if member(rid);
+        allow create, update: if member(rid) && textOk(request.resource.data);
+        allow delete: if roomOwner(rid);
+      }
+
+      // 가져온 기록 목록
+      match /imports/{iid} {
+        allow read: if member(rid);
+        allow write: if roomOwner(rid);
+      }
+    }
+  }
+}
