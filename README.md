@@ -21,13 +21,12 @@ Firebase 무료 요금제로 누구나 자기 사이트를 직접 만들어 쓸 
 
 ## 화면
 
-| 로비 | 세션 |
-|---|---|
-| ![로비](docs/lobby.png) | ![세션 화면](docs/session.png) |
-
-| 요약 | 캐릭터 | 핸드아웃 | 방 설정 |
-|---|---|---|---|
-| ![요약](docs/summary.png) | ![캐릭터](docs/chars.png) | ![핸드아웃](docs/handout.png) | ![방 설정](docs/settings.png) |
+<img width="1552" height="1848" alt="lobby" src="https://github.com/user-attachments/assets/8e31f478-d917-459f-90d0-95b9606a7536" />
+<img width="2400" height="1720" alt="handout" src="https://github.com/user-attachments/assets/40a0979d-8c06-4535-8a5b-c203cca9f613" />
+<img width="720" height="1720" alt="chars" src="https://github.com/user-attachments/assets/d1856c34-44f4-4237-b2e9-203f25c3a48f" />
+<img width="720" height="1720" alt="summary" src="https://github.com/user-attachments/assets/8407cf76-c311-4e12-9769-d5fa83c18bf6" />
+<img width="1180" height="1530" alt="settings" src="https://github.com/user-attachments/assets/1b08b8bf-862c-4470-8ae4-3fa3b9e9d69c" />
+<img width="2400" height="1720" alt="session" src="https://github.com/user-attachments/assets/44aa0655-900b-49f1-a73e-a33924933e15" />
 
 ## 설치
 
